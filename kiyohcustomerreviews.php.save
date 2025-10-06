@@ -1,0 +1,331 @@
+<?php
+/**
+* 2007-2025 PrestaShop
+*
+* NOTICE OF LICENSE
+*
+* This source file is subject to the Academic Free License (AFL 3.0)
+* that is bundled with this package in the file LICENSE.txt.
+* It is also available through the world-wide-web at this URL:
+* http://opensource.org/licenses/afl-3.0.php
+* If you did not receive a copy of the license and are unable to
+* obtain it through the world-wide-web, please send an email
+* to license@prestashop.com so we can send you a copy immediately.
+*
+* DISCLAIMER
+*
+* Do not edit or add to this file if you wish to upgrade PrestaShop to newer
+* versions in the future. If you wish to customize PrestaShop for your
+* needs please refer to http://www.prestashop.com for more information.
+*
+*  @author    PrestaShop SA <contact@prestashop.com>
+*  @copyright 2007-2025 PrestaShop SA
+*  @license   http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
+*  International Registered Trademark & Property of PrestaShop SA
+*/
+if (!defined('_PS_VERSION_')) {
+    exit;
+}
+
+class KiyohCustomerReviews extends Module
+{
+    protected $config_form = false;
+
+    public function __construct()
+    {
+        $this->name = 'kiyohcustomerreviews';
+        $this->tab = 'others';
+        $this->version = '1.3.4';
+        $this->author = 'klant­en­vertellen';
+        $this->need_instance = 1;
+        $this->bootstrap = true;
+
+        parent::__construct();
+
+        $this->displayName = $this->l('Kiyoh Customer Review');
+        $this->description = $this->l('Collect and display Kiyoh customer reviews in your shop');
+        $this->confirmUninstall = $this->l('Are you sure you want to uninstall');
+
+        $this->ps_versions_compliancy = array('min' => '1.6', 'max' => _PS_VERSION_);
+    }
+
+    public function install()
+    {
+        return parent::install() &&
+            $this->registerHook('displayHeader') &&
+            $this->registerHook('displayBackOfficeHeader') &&
+            $this->registerHook('actionOrderStatusUpdate') &&
+            $this->registerHook('displayNav');
+    }
+
+    public function uninstall()
+    {
+        $config_keys = [
+            'KIYOHCUSTOMERREVIEWS_LIVE_MODE',
+            'KIYOHCUSTOMERREVIEWS_ACCOUNT_EMAIL',
+            'KIYOHCUSTOMERREVIEWS_ACCOUNT_PASSWORD',
+            'KIYOH_SERVER_NAME',
+            'KIYOH_HASH',
+            'KIYOH_LOCATION_ID',
+            'KIYOH_LOCATION_NAME',
+            'KIYOH_WIDGET_ENABLED',
+            'KIYOH_DELAY',
+            'KIYOH_LANGUAGE'
+        ];
+        
+        foreach ($config_keys as $key) {
+            Configuration::deleteByName($key);
+        }
+
+        return parent::uninstall();
+    }
+
+    public function getContent()
+    {
+        $output = '';
+
+        // First, fix any array values in the database
+        $this->fixArrayConfigurationValues();
+
+        if (Tools::isSubmit('submitKiyohCustomerReviewsModule')) {
+            $this->postProcess();
+            
+            // Get the NEWLY SUBMITTED values directly from the form
+            $server_name = Tools::getValue('KIYOH_SERVER_NAME');
+            $hash = Tools::getValue('KIYOH_HASH');
+            $location_id = Tools::getValue('KIYOH_LOCATION_ID');
+            $location_name = Tools::getValue('KIYOH_LOCATION_NAME');
+            $delay = Tools::getValue('KIYOH_DELAY');
+            $language = Tools::getValue('KIYOH_LANGUAGE');
+            
+            $output .= $this->displayConfirmation('SUCCESS: Saved values - ' .
+                'Server=' . $server_name . ', ' .
+                'Hash=' . $hash . ', ' .
+                'Location ID=' . $location_id . ', ' .
+                'Name=' . $location_name . ', ' .
+                'Delay=' . $delay . ', ' .
+                'Language=' . $language);
+        }
+
+        // Get configuration values safely
+        $config_values = $this->getSafeConfigurationValues();
+
+        $this->context->smarty->assign(array_merge([
+            'module' => $this,
+            'token' => Tools::getAdminTokenLite('AdminModules'),
+            'currentIndex' => AdminController::$currentIndex . '&configure=' . $this->name,
+        ], $config_values));
+
+        return $output . $this->display(__FILE__, 'views/templates/admin/configure.tpl');
+    }
+
+    protected function fixArrayConfigurationValues()
+    {
+        $config_keys = [
+            'KIYOH_SERVER_NAME',
+            'KIYOH_HASH',
+            'KIYOH_LOCATION_ID',
+            'KIYOH_LOCATION_NAME',
+            'KIYOH_WIDGET_ENABLED',
+            'KIYOHCUSTOMERREVIEWS_ACCOUNT_EMAIL',
+            'KIYOHCUSTOMERREVIEWS_ACCOUNT_PASSWORD',
+            'KIYOHCUSTOMERREVIEWS_LIVE_MODE',
+            'KIYOH_DELAY',
+            'KIYOH_LANGUAGE'
+        ];
+
+        foreach ($config_keys as $key) {
+            $value = Configuration::get($key);
+            if (is_array($value)) {
+                Configuration::updateValue($key, '');
+            }
+        }
+    }
+
+    protected function getSafeConfigurationValues()
+    {
+        $config_keys = [
+            'KIYOH_SERVER_NAME',
+            'KIYOH_HASH',
+            'KIYOH_LOCATION_ID',
+            'KIYOH_LOCATION_NAME',
+            'KIYOH_WIDGET_ENABLED',
+            'KIYOHCUSTOMERREVIEWS_ACCOUNT_EMAIL',
+            'KIYOHCUSTOMERREVIEWS_ACCOUNT_PASSWORD',
+            'KIYOH_DELAY',
+            'KIYOH_LANGUAGE'
+        ];
+
+        $values = [];
+        foreach ($config_keys as $key) {
+            $value = Configuration::get($key);
+            $values[$key] = is_array($value) ? '' : $value;
+        }
+
+        return $values;
+    }
+
+    protected function postProcess()
+    {
+        $config_keys = [
+            'KIYOH_SERVER_NAME', 
+            'KIYOH_HASH',
+            'KIYOH_LOCATION_ID',
+            'KIYOH_LOCATION_NAME',
+            'KIYOH_WIDGET_ENABLED',
+            'KIYOHCUSTOMERREVIEWS_ACCOUNT_EMAIL',
+            'KIYOHCUSTOMERREVIEWS_ACCOUNT_PASSWORD',
+            'KIYOHCUSTOMERREVIEWS_LIVE_MODE',
+            'KIYOH_DELAY',
+            'KIYOH_LANGUAGE'
+        ];
+
+        foreach ($config_keys as $key) {
+            $value = Tools::getValue($key);
+            if (is_array($value)) {
+                $value = '';
+            }
+            Configuration::updateValue($key, (string)$value);
+        }
+    }
+
+    public function hookActionOrderStatusUpdate($params)
+    {
+        $newStatus = $params['newOrderStatus'];
+        $order = new Order((int)$params['id_order']);
+
+        // Check both name and ID for "delivered" status
+        $isDelivered = (
+            strtolower($newStatus->name) === 'delivered' || 
+            strtolower($newStatus->name) === 'geleverd' || // Dutch
+            in_array($newStatus->id, [5, 4]) // Common delivered status IDs
+        );
+
+        if ($isDelivered) {
+            PrestaShopLogger::addLog("Kiyoh: Order #{$order->id} marked as Delivered ({$newStatus->name}). Triggering Kiyoh review logic.");
+            
+            // Send the actual request to Kiyoh
+            $result = $this->sendKiyohReviewRequest($order);
+            
+            if ($result) {
+                PrestaShopLogger::addLog("Kiyoh: Successfully sent review request for order #{$order->id}");
+            } else {
+                PrestaShopLogger::addLog("Kiyoh: FAILED to send review request for order #{$order->id}");
+            }
+        }
+    }
+
+    protected function sendKiyohReviewRequest($order)
+    {
+        // Get configuration values
+        $location_id = Configuration::get('KIYOH_LOCATION_ID');
+        $hash = Configuration::get('KIYOH_HASH');
+        $server_name = Configuration::get('KIYOH_SERVER_NAME');
+        $delay = Configuration::get('KIYOH_DELAY');
+        $language = Configuration::get('KIYOH_LANGUAGE');
+
+        // Set defaults if not configured
+        if (empty($delay)) {
+            $delay = 1;
+        }
+        if (empty($language)) {
+            $language = 'nl';
+        }
+
+        // Validate required configuration
+        if (empty($location_id) || empty($hash) || empty($server_name)) {
+            PrestaShopLogger::addLog("Kiyoh: Missing configuration - Location ID: {$location_id}, Hash: {$hash}, Server: {$server_name}");
+            return false;
+        }
+
+        // Extract customer info
+        $customer = new Customer($order->id_customer);
+        if (!Validate::isLoadedObject($customer)) {
+            PrestaShopLogger::addLog("Kiyoh: Customer not found for order #{$order->id}");
+            return false;
+        }
+
+        $email = $customer->email;
+        $firstname = urlencode($customer->firstname);
+        $lastname = urlencode($customer->lastname);
+
+        // Build URL parameters exactly like the professional version
+        $vars = [
+            'hash' => $hash,
+            'location_id' => $location_id,
+            'invite_email' => $email,
+            'delay' => $delay,
+            'first_name' => $firstname,
+            'last_name' => $lastname,
+            'language' => $language
+        ];
+
+        $url = "https://{$server_name}/v1/invite/external?" . http_build_query($vars);
+
+        PrestaShopLogger::addLog("Kiyoh: Sending review request for order #{$order->id} - URL: " . $url);
+
+        // Send to Kiyoh API using the exact same method as professional version
+        return $this->callKiyohApi($url);
+    }
+
+    protected function callKiyohApi($url)
+    {
+        PrestaShopLogger::addLog("Kiyoh: Calling API - URL: {$url}");
+
+        // Make API call using cURL - exactly like professional version
+        $curl = curl_init();
+        curl_setopt($curl, CURLOPT_URL, $url);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_HEADER, false);
+        curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 2);
+        curl_setopt($curl, CURLOPT_TIMEOUT, 2);
+        
+        $response = curl_exec($curl);
+        $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($curl);
+        curl_close($curl);
+        
+        // Log the response
+        PrestaShopLogger::addLog("Kiyoh: API Response - HTTP {$httpCode}: {$response}");
+        
+        if ($curlError) {
+            PrestaShopLogger::addLog("Kiyoh: cURL Error - {$curlError}");
+            return false;
+        }
+
+        // Check for successful response
+        if (trim($response) === 'OK') {
+            PrestaShopLogger::addLog("Kiyoh: API call successful - Response: {$response}");
+            return true;
+        } else {
+            PrestaShopLogger::addLog("Kiyoh: API call failed with response: {$response}");
+            return false;
+        }
+    }
+
+    public function hookDisplayBackOfficeHeader()
+    {
+        if (Tools::getValue('configure') == $this->name) {
+            $this->context->controller->addJS($this->_path.'views/js/back.js');
+            $this->context->controller->addCSS($this->_path.'views/css/back.css');
+        }
+    }
+
+    public function hookDisplayHeader()
+    {
+        if (Configuration::get('KIYOH_WIDGET_ENABLED')) {
+            $this->context->smarty->assign([
+                'KIYOH_SERVER_NAME' => Configuration::get('KIYOH_SERVER_NAME'),
+                'KIYOH_HASH' => Configuration::get('KIYOH_HASH'),
+                'KIYOH_LOCATION_ID' => Configuration::get('KIYOH_LOCATION_ID'),
+                'KIYOH_LOCATION_NAME' => Configuration::get('KIYOH_LOCATION_NAME'),
+            ]);
+
+            return $this->display(__FILE__, 'views/templates/hook/widget.tpl');
+        }
+
+        return '';
+    }
+}
+
