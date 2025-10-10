@@ -1,4 +1,14 @@
-# Ignore editor backup/save files
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
 *.save
 *.backup
-*.bak
+
+# Logs
+*.log
+
+# Dependency folders (if ever added locally)
+vendor/
+node_modules/
